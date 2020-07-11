@@ -1,75 +1,110 @@
 package main
 
 import (
-	"covid-monitoring/collect"
-	"crypto/tls"
-	"flag"
 	"fmt"
-	"net/http"
-	"net/url"
-	_ "covid-monitoring/collect"
-	"os"
+	"github.com/gocolly/colly"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
-
-var visited = make(map[string]bool)
-var collectlinks = collect.CollectLinks{}
-
 func main() {
-	flag.Parse()
+	var countries [228]string
+	countriesLength := 0
 
-	args := flag.Args()
-	fmt.Println(args)
-	if len(args) < 1 {
-		fmt.Println("Please specify start page")
-		os.Exit(1)
-	}
+	var records [685]string
+	recordsLength := 0
 
-	queue := make(chan string)
+	var parsedRecords [684]int64
 
-	go func() { queue <- args[0] }()
+	var cases [228]int64
+	var deaths [228]int64
+	var recovered [228]int64
+	count := 0
 
-	for uri := range queue {
-		enqueue(uri, queue)
-	}
-}
+	c := colly.NewCollector()
 
-func enqueue(uri string, queue chan string) {
-	fmt.Println("fetching", uri)
-	visited[uri] = true
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-	client := http.Client{Transport: transport}
-	resp, err := client.Get(uri)
-	if err != nil {
-		return
-	}
-	defer resp.Body.Close()
-
-	links := collectlinks.All(resp.Body)
-
-	for _, link := range links {
-		absolute := fixUrl(link, uri)
-		if uri != "" {
-			if !visited[absolute] {
-				go func() { queue <- absolute }()
+	c.OnHTML("table tr th[scope] a[href][title]", func(e *colly.HTMLElement) {
+		if countriesLength < 1 {
+			countries[countriesLength] = e.Text
+			countriesLength++
+		}else {
+			if countries[countriesLength - 1] != "Tanzania" {
+				countries[countriesLength] = e.Text
+				countriesLength++
 			}
 		}
-	}
-}
+	})
 
-func fixUrl(href, base string) (string) {
-	uri, err := url.Parse(href)
-	if err != nil {
-		return ""
+	c.OnHTML("table tr td", func(e *colly.HTMLElement) {
+		match, _ := regexp.MatchString("^\\[", e.Text)
+		if !match {
+			if recordsLength < 1 {
+				records[recordsLength] = e.Text
+				recordsLength++
+			}else {
+				xmatch, _ := regexp.MatchString("History of deaths", records[recordsLength - 1])
+				if !xmatch {
+					records[recordsLength] = e.Text
+					recordsLength++
+				}
+			}
+		}
+	})
+
+	c.Visit("https://en.wikipedia.org/wiki/Template:COVID-19_pandemic_data")
+
+
+	for i := 0; i < len(parsedRecords); i++{
+		records[i] = strings.TrimSuffix(records[i], "\n")
+
+		st := strings.Replace(records[i], "\n", "", -1)
+		st = strings.Replace(records[i], ",", "", -1)
+
+		var intBase int64
+		var err error
+		if st == "No data"{
+			intBase = -1
+		}else {
+			intBase, err = strconv.ParseInt(st, 0, 64)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		parsedRecords[i] = intBase
 	}
-	baseUrl, err := url.Parse(base)
-	if err != nil {
-		return ""
+
+	count = 0
+	for i := 0; i < len(parsedRecords); i++ {
+		if i + 2 <= len(parsedRecords) {
+			cases[count] = parsedRecords[i]
+			i += 2
+			count++
+		}
 	}
-	uri = baseUrl.ResolveReference(uri)
-	return uri.String()
+
+	count = 0
+	for i := 1; i < len(parsedRecords); i++ {
+		if i + 2 <= len(parsedRecords) {
+			deaths[count] = parsedRecords[i]
+			i += 2
+			count++
+		}
+	}
+
+	count = 0
+	for i := 2; i < len(parsedRecords); i++ {
+		if i + 2 <= len(parsedRecords) {
+			recovered[count] = parsedRecords[i]
+			i += 2
+			count++
+		}else{
+			recovered[len(recovered) - 1] = parsedRecords[len(parsedRecords) - 1]
+		}
+	}
+
+	for i := 0; i < len(deaths); i++ {
+		fmt.Println(countries[i], " ", cases[i], " ", deaths[i], " ", recovered[i])
+	}
 }
