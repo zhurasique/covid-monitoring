@@ -1,0 +1,9 @@
+bind_addr = ":8084"
+log_level = "debug"
+
+[store]
+host_name = "localhost"
+host_port = 5432
+username = "postgres"
+password = "123"
+database_name = "go2"
